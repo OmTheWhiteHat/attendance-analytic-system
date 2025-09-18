@@ -89,7 +89,18 @@ export default async function handler(req, res) {
         }
     }
 
-    res.status(200).json({ attendanceByCourse, atRiskStudents });
+    // 4. Get breakdown of present vs. late
+    const statusBreakdown = await Attendance.aggregate([
+        { $match: { course: { $in: courseIds } } },
+        {
+            $group: {
+                _id: '$status',
+                count: { $sum: 1 }
+            }
+        }
+    ]);
+
+    res.status(200).json({ attendanceByCourse, atRiskStudents, statusBreakdown });
 
   } catch (error) {
     console.error('Error fetching teacher analytics:', error);

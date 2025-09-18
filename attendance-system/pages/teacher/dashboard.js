@@ -3,6 +3,7 @@ import { useSession, getSession } from 'next-auth/react';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import AttendanceChart from '../../components/analytics/AttendanceChart';
+import StatusPieChart from '../../components/analytics/StatusPieChart';
 
 export default function TeacherDashboard() {
   const { data: session } = useSession();
@@ -45,13 +46,23 @@ export default function TeacherDashboard() {
 
       {analytics && (
         <>
-          <div style={{ marginTop: '2rem', maxWidth: '800px', margin: 'auto' }}>
-            <h2>Attendance Overview</h2>
-            {analytics.attendanceByCourse.length > 0 ? (
-                <AttendanceChart data={analytics.attendanceByCourse} />
-            ) : (
-                <p>No attendance data available yet. Create a session to get started.</p>
-            )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginTop: '2rem', alignItems: 'flex-start' }}>
+            <div style={{ maxWidth: '600px' }}>
+              <h2>Attendance Overview</h2>
+              {analytics.attendanceByCourse.length > 0 ? (
+                  <AttendanceChart data={analytics.attendanceByCourse} />
+              ) : (
+                  <p>No attendance data available yet.</p>
+              )}
+            </div>
+            <div style={{ maxWidth: '400px' }}>
+                <h2>Status Breakdown</h2>
+                {analytics.statusBreakdown.length > 0 ? (
+                    <StatusPieChart data={analytics.statusBreakdown} />
+                ) : (
+                    <p>No status data available yet.</p>
+                )}
+            </div>
           </div>
 
           <div style={{ marginTop: '3rem' }}>

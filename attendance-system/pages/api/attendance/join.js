@@ -55,11 +55,18 @@ export default async function handler(req, res) {
     }
 
     // Create the attendance record
+    const LATE_THRESHOLD_MINUTES = 15;
+    const attendanceTime = new Date();
+    const sessionStartTime = new Date(activeSession.startTime);
+    const minutesDiff = (attendanceTime - sessionStartTime) / (1000 * 60);
+
     const newAttendance = new Attendance({
       session: activeSession._id,
       student: studentId,
       course: activeSession.course._id,
       method: method || 'qr-proximity', // Use method from body, default to qr-proximity
+      status: minutesDiff > LATE_THRESHOLD_MINUTES ? 'late' : 'present',
+      timestamp: attendanceTime,
     });
 
     await newAttendance.save();

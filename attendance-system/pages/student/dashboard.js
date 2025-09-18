@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import StatsCard from '../../components/analytics/StatsCard';
 import RankBoard from '../../components/analytics/RankBoard';
+import StatusPieChart from '../../components/analytics/StatusPieChart';
+import HistoryGraph from '../../components/analytics/HistoryGraph';
 
 export default function StudentDashboard() {
   const { data: session } = useSession();
@@ -33,44 +35,65 @@ export default function StudentDashboard() {
     }
   }, [session]);
 
+  const dashboardStyles = {
+    padding: '2rem',
+    fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue, sans-serif',
+  };
+
+  const headerStyles = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottom: '1px solid #eaeaea',
+    paddingBottom: '1rem',
+    marginBottom: '2rem',
+  };
+
+  const gridStyles = {
+    display: 'grid',
+    gap: '1.5rem',
+  };
+
   return (
-    <div style={{ padding: '2rem' }}>
-      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-        <h1>Your Dashboard</h1>
+    <div style={dashboardStyles}>
+      <header style={headerStyles}>
+        <div>
+          <h1>Your Dashboard</h1>
+          <p>Welcome, {session?.user?.name}!</p>
+        </div>
         <div>
             <Link href="/student/profile" style={{ marginRight: '1rem', textDecoration: 'underline' }}>My Profile</Link>
             <Link href="/student/join-session" style={{ padding: '0.75rem 1.5rem', backgroundColor: 'green', color: 'white', textDecoration: 'none', borderRadius: '5px' }}>
                 Join a Session
             </Link>
         </div>
-      </div>
-      <p>Welcome, {session?.user?.name}!</p>
+      </header>
 
       {isLoading && <p>Loading your stats...</p>}
       {error && <p style={{ color: 'red' }}>{error}</p>}
 
       {analytics && (
-        <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '2rem' }}>
+        <div style={gridStyles}>
+          {/* Top Row Stats */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem' }}>
             <StatsCard title="Attendance Score" value={`${analytics.attendanceScore}%`} />
+            <StatsCard title="Current Streak" value={analytics.streak} />
             <StatsCard title="Your Rank" value={`#${analytics.rank}`} />
           </div>
 
-          <RankBoard leaderboard={analytics.leaderboard} currentUserRank={analytics.rank} currentUserName={session.user.name} />
-
-          <div style={{marginTop: '2rem'}}>
-            <h3>Today's Attendance</h3>
-            {analytics.todaysAttendance.length > 0 ? (
-                <ul>
-                    {analytics.todaysAttendance.map(att => (
-                        <li key={att._id}>You were marked present in <strong>{att.course.name}</strong> at {new Date(att.timestamp).toLocaleTimeString()}.</li>
-                    ))}
-                </ul>
-            ) : (
-                <p>No attendance recorded yet for today.</p>
-            )}
+          {/* Middle Row Charts */}
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', alignItems: 'flex-start' }}>
+            {analytics.attendanceHistory.length > 0 ? (
+                <HistoryGraph data={analytics.attendanceHistory} />
+            ) : <p>No history to display.</p>}
+            {analytics.statusBreakdown.length > 0 ? (
+                <StatusPieChart data={analytics.statusBreakdown} />
+            ) : <p>No status breakdown available.</p>}
           </div>
-        </>
+
+          {/* Bottom Row Leaderboard */}
+          <RankBoard leaderboard={analytics.leaderboard} currentUserRank={analytics.rank} currentUserName={session.user.name} />
+        </div>
       )}
     </div>
   );

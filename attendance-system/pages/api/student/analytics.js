@@ -92,11 +92,44 @@ export default async function handler(req, res) {
 
     const rank = allStudentsRanked.length > 0 ? allStudentsRanked[0].rank + 1 : 'N/A';
 
+    // 5. Calculate consecutive session streak
+    const allSessionsForStudent = await Session.find({ course: { $in: courseIds } }).sort({ startTime: -1 });
+    const attendedSessionRecords = await Attendance.find({ student: studentId }).select('session');
+    const attendedSessionIds = new Set(attendedSessionRecords.map(a => a.session.toString()));
+
+    let streak = 0;
+    for (const session of allSessionsForStudent) {
+        if (attendedSessionIds.has(session._id.toString())) {
+            streak++;
+        } else {
+            // Break the loop as soon as a missed session is found
+            break;
+        }
+    }
+
+    // 6. Get personal status breakdown (present vs. late)
+    const statusBreakdown = await Attendance.aggregate([
+        { $match: { student: studentId } },
+        { $group: { _id: '$status', count: { $sum: 1 } } }
+    ]);
+
+    // 7. Get attendance history for the last 20 sessions
+    const historySessions = allSessionsForStudent.slice(0, 20).reverse(); // Oldest first
+    const attendanceHistory = historySessions.map(session => {
+        return {
+            sessionName: `${session.course.name} - ${new Date(session.startTime).toLocaleDateString()}`,
+            attended: attendedSessionIds.has(session._id.toString()),
+        }
+    });
+
     res.status(200).json({
       attendanceScore,
       rank,
+      streak,
       todaysAttendance, // Array of { course: { name: ... }, timestamp: ... }
       leaderboard, // Array of { _id, name, attendanceCount }
+      statusBreakdown,
+      attendanceHistory,
     });
 
   } catch (error) {
