@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { getSession } from 'next-auth/react';
 import { useRouter } from 'next/router';
-import QRCode from '../../components/sessions/QRCode';
-import dbConnect from '../../lib/database';
-import Course from '../../models/Course';
+import { QRCodeCanvas } from 'qrcode.react';
+import dbConnect from '../../lib/couchdb';
 
 export default function CreateSessionPage({ courses }) {
   const [courseId, setCourseId] = useState(courses[0]?._id || '');
-  const [duration, setDuration] = useState(10); // Default duration in minutes
+  const [duration, setDuration] = useState(10);
   const [sessionData, setSessionData] = useState(null);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -17,6 +16,7 @@ export default function CreateSessionPage({ courses }) {
     e.preventDefault();
     setIsLoading(true);
     setError('');
+    setSessionData(null);
 
     const res = await fetch('/api/teacher/session', {
       method: 'POST',
@@ -28,64 +28,68 @@ export default function CreateSessionPage({ courses }) {
 
     if (!res.ok) {
       setError(data.message || 'Something went wrong');
-      setSessionData(null);
     } else {
       setSessionData(data);
     }
     setIsLoading(false);
   };
 
+  const qrCodeValue = sessionData ? JSON.stringify({ sessionKey: sessionData.sessionId }) : '';
+
   return (
-    <div style={{ padding: '2rem' }}>
-      <button onClick={() => router.back()}>&larr; Back to Dashboard</button>
-      <h1>Create New Attendance Session</h1>
-      {!sessionData ? (
-        <form onSubmit={handleCreateSession}>
-          <div style={{ marginBottom: '1rem' }}>
-            <label>Course</label>
-            <select 
-              value={courseId} 
-              onChange={(e) => setCourseId(e.target.value)} 
-              required
-              style={{ width: '100%', padding: '0.5rem' }}
-            >
+    <div className="container">
+      <div className="glass-card" style={{maxWidth: '800px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem'}}>
+        {/* Form Section */}
+        <div>
+          <button onClick={() => router.back()}>&larr; Back</button>
+          <h1 style={{marginTop: '1rem'}}>Create Session</h1>
+          <form onSubmit={handleCreateSession}>
+            <label className="form-label" htmlFor="course">Course</label>
+            <select id="course" value={courseId} onChange={(e) => setCourseId(e.target.value)} required className="form-select">
               {courses.map(course => (
-                <option key={course._id} value={course._id}>{course.name} - {course.code}</option>
+                <option key={course._id} value={course._id}>{course.name}</option>
               ))}
             </select>
-          </div>
-          <div style={{ marginBottom: '1rem' }}>
-            <label>Duration (in minutes)</label>
-            <input
-              type="number"
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              min="1"
-              required
-              style={{ width: '100%', padding: '0.5rem' }}
-            />
-          </div>
-          <button type="submit" disabled={isLoading} style={{ padding: '0.75rem 1.5rem', cursor: 'pointer' }}>
-            {isLoading ? 'Creating...' : 'Create Session'}
-          </button>
-          {error && <p style={{ color: 'red' }}>{error}</p>}
-        </form>
-      ) : (
-        <div>
-          <h2>Session Created!</h2>
-          <p>Share this QR code with your students.</p>
-          <QRCode sessionKey={sessionData.sessionKey} />
-          <p>This session will expire at {new Date(sessionData.endTime).toLocaleTimeString()}</p>
+            
+            <label className="form-label" htmlFor="duration">Duration (minutes)</label>
+            <input id="duration" type="number" value={duration} onChange={(e) => setDuration(e.target.value)} min="1" required className="form-input" />
+            
+            <button type="submit" disabled={isLoading} className="form-button">
+              {isLoading ? 'Creating...' : 'Generate Session Code'}
+            </button>
+            {error && <p className="form-error">{error}</p>}
+          </form>
         </div>
-      )}
+
+        {/* QR Code and Session Code Display Section */}
+        <div style={{textAlign: 'center', borderLeft: '1px solid var(--glass-border)', paddingLeft: '2rem'}}>
+          <h2>Session Details</h2>
+          {sessionData ? (
+            <div>
+              <p style={{margin: '1rem 0'}}>Scan the QR code or enter the code below.</p>
+              <div style={{background: 'white', padding: '1rem', borderRadius: '8px', display: 'inline-block'}}>
+                <QRCodeCanvas value={qrCodeValue} size={200} />
+              </div>
+              <div style={{marginTop: '1.5rem'}}>
+                <label className="form-label">Session Code</label>
+                <input type="text" readOnly value={sessionData.sessionId} className="form-input" style={{textAlign: 'center', fontWeight: 'bold', fontSize: '1.2rem'}} />
+              </div>
+              <p>Expires at: {new Date(sessionData.endTime).toLocaleTimeString()}</p>
+            </div>
+          ) : (
+            <p style={{marginTop: '2rem'}}>Your session code will appear here once generated.</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
 export async function getServerSideProps(context) {
   const session = await getSession(context);
+  const teacherId = session?.user?.id;
 
-  if (!session || session.user.role !== 'teacher') {
+  if (!session || !teacherId || session.user.role !== 'teacher') {
     return {
       redirect: {
         destination: '/login',
@@ -94,15 +98,30 @@ export async function getServerSideProps(context) {
     };
   }
 
-  await dbConnect();
+  try {
+    const nano = await dbConnect();
+    const db = nano.db.use('smartattend');
+    
+    const coursesResult = await db.find({
+      selector: {
+        type: 'course',
+        teacherId: teacherId
+      }
+    });
 
-  // Find courses taught by this teacher
-  const courses = await Course.find({ teacher: session.user.id }).lean();
-
-  return {
-    props: {
-      session,
-      courses: JSON.parse(JSON.stringify(courses)), // Serialize the data
-    },
-  };
+    return {
+      props: {
+        session,
+        courses: coursesResult.docs,
+      },
+    };
+  } catch (error) {
+    console.error("Error fetching courses for teacher:", error);
+    return {
+      props: {
+        session,
+        courses: [],
+      },
+    };
+  }
 }

@@ -8,7 +8,7 @@ import { useSession, signOut as nextAuthSignOut } from 'next-auth/react';
 import { useUser, useClerk } from '@clerk/nextjs';
 import { getAuthenticatedUser } from '../../lib/auth-helper';
 
-export default function StudentDashboard({ user }) {
+export default function StudentDashboard({ user, authType }) {
   const { data: nextAuthSession } = useSession(); // next-auth session
   const { isLoaded, isSignedIn, user: clerkUser } = useUser(); // Clerk user
   const { signOut: clerkSignOut } = useClerk(); // Clerk signOut
@@ -80,21 +80,21 @@ export default function StudentDashboard({ user }) {
         <div>
           <h1>Your Dashboard</h1>
           <p>Welcome, {displayUser?.name || displayUser?.fullName || displayUser?.firstName}!</p>
+          <p style={{fontSize: '0.8rem', color: '#999', marginTop: '0.25rem'}}>
+            Account Type: {authType}
+          </p>
         </div>
         <div>
             <Link href="/student/profile" style={{ marginRight: '1rem', textDecoration: 'underline' }}>My Profile</Link>
             <Link href="/student/join-session" style={{ padding: '0.75rem 1.5rem', backgroundColor: 'green', color: 'white', textDecoration: 'none', borderRadius: '5px' }}>
                 Join a Session
             </Link>
-            <button 
-              onClick={() => { 
-                if (nextAuthSession) { nextAuthSignOut({ callbackUrl: '/login' }); } 
-                else if (isSignedIn) { clerkSignOut(); } 
-              }}
-              style={{ padding: '0.75rem 1.5rem', backgroundColor: 'red', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', marginLeft: '1rem' }}
+            <Link 
+              href="/logout"
+              style={{ padding: '0.75rem 1.5rem', backgroundColor: 'red', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', marginLeft: '1rem', textDecoration: 'none' }}
             >
                 Sign Out
-            </button>
+            </Link>
         </div>
       </header>
 
@@ -112,10 +112,10 @@ export default function StudentDashboard({ user }) {
 
           {/* Middle Row Charts */}
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', alignItems: 'flex-start' }}>
-            {analytics.attendanceHistory.length > 0 ? (
+            {analytics?.attendanceHistory?.length > 0 ? (
                 <HistoryGraph data={analytics.attendanceHistory} />
             ) : <p>No history to display.</p>}
-            {analytics.statusBreakdown.length > 0 ? (
+            {analytics?.statusBreakdown?.length > 0 ? (
                 <StatusPieChart data={analytics.statusBreakdown} />
             ) : <p>No status breakdown available.</p>}
           </div>
@@ -140,8 +140,7 @@ export async function getServerSideProps(context) {
     };
   }
 
-  // Check if onboarding is complete
-  if (!user.onboardingComplete) {
+  if (user.onboardingComplete !== true) {
     return {
       redirect: {
         destination: '/student/onboarding',
@@ -150,7 +149,13 @@ export async function getServerSideProps(context) {
     };
   }
 
+  // Determine auth type
+  const authType = user.clerkId ? 'Social (Clerk)' : 'Traditional';
+
   return {
-    props: { user: JSON.parse(JSON.stringify(user)) },
+    props: { 
+      user: JSON.parse(JSON.stringify(user)),
+      authType 
+    },
   };
 }

@@ -1,158 +1,169 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
-import { QrReader } from 'react-qr-reader';
-import * as faceapi from 'face-api.js';
-import dbConnect from '../../lib/database';
-import Student from '../../models/Student';
+import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { getAuthenticatedUser } from '../../lib/auth-helper';
 
-export default function JoinSessionPage({ user }) {
+const QrScanner = dynamic(() => import('@yudiel/react-qr-scanner').then(mod => mod.QrScanner), { 
+  ssr: false,
+  loading: () => <p>Loading Scanner...</p>
+});
+
+let faceapi;
+if (typeof window !== 'undefined') {
+  import('face-api.js').then(api => {
+    faceapi = api;
+  });
+}
+
+export default function JoinSessionPage({ user, hasProfileImage, needsReverification }) {
   const router = useRouter();
   
-  const [step, setStep] = useState('qrScan'); // qrScan, faceScan, processing, success, error
-  const [feedback, setFeedback] = useState('Point your camera at the QR code.');
-  const [scannedSessionKey, setScannedSessionKey] = useState(null);
-
+  const [mode, setMode] = useState('choice');
+  const [step, setStep] = useState('scan');
+  const [feedback, setFeedback] = useState('Choose how you want to join the session.');
+  const [sessionKey, setSessionKey] = useState('');
   const videoRef = useRef();
   const canvasRef = useRef();
 
-  // 1. Load Face-API models
   useEffect(() => {
     const loadModels = async () => {
-      const MODEL_URL = '/models';
-      setFeedback('Loading face recognition models...');
-      await Promise.all([
-        faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
-        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-      ]);
-      setFeedback('Point your camera at the QR code.');
+      if (faceapi && faceapi.nets?.ssdMobilenetv1?.loadFromUri) {
+        const MODEL_URL = '/models';
+        await Promise.all([
+          faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+        ]);
+      }
     };
     loadModels();
   }, []);
 
-  // 2. Handle QR Code Scan
-  const handleQrScan = (data) => {
-    if (data) {
+  const validateAndProceed = async (scannedSessionKey) => {
+    setFeedback('Validating session...');
+    try {
+      const res = await fetch('/api/student/validate-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionKey: scannedSessionKey }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || 'Session validation failed.');
+      }
+
+      setSessionKey(scannedSessionKey);
+      if (needsReverification) {
+        setStep('promptToReverify');
+        setFeedback('Your face scan is older than 6 months. Please go to your profile to re-verify.');
+      } else if (hasProfileImage) {
+        setStep('faceScan');
+        setFeedback('Session validated. Please verify your face.');
+      } else {
+        setStep('promptToSetImage');
+        setFeedback('Session validated. You must set a profile picture for verification.');
+      }
+    } catch (e) {
+      setFeedback(e.message);
+      setMode('choice'); // Go back to choice on error
+    }
+  };
+
+  const handleQrScan = (result) => {
+    if (result) {
       try {
-        const { sessionKey } = JSON.parse(data.text);
-        if (sessionKey) {
-          setScannedSessionKey(sessionKey);
-          setStep('faceScan');
-          setFeedback('QR code accepted. Now, please verify your face.');
+        const parsedResult = JSON.parse(result);
+        if (parsedResult.sessionKey) {
+          validateAndProceed(parsedResult.sessionKey);
         } else {
-            throw new Error('Invalid QR Code format.');
+          throw new Error('Invalid QR Code format.');
         }
       } catch (e) {
-        setStep('error');
         setFeedback(e.message || 'Invalid QR Code.');
       }
     }
   };
 
-  // 3. Start video and face detection when step is faceScan
+  const handleCodeSubmit = (e) => {
+    e.preventDefault();
+    if (sessionKey) {
+      validateAndProceed(sessionKey);
+    } else {
+      setFeedback('Please enter a session code.');
+    }
+  };
+
+  const startVideo = () => {
+    navigator.mediaDevices.getUserMedia({ video: {} })
+      .then(stream => {
+        if (videoRef.current) videoRef.current.srcObject = stream;
+      })
+      .catch(err => setFeedback('Could not access camera. Please enable permissions.'));
+  };
+
   useEffect(() => {
     if (step === 'faceScan') {
       startVideo();
     }
   }, [step]);
 
-  const startVideo = () => {
-    navigator.mediaDevices.getUserMedia({ video: {} })
-      .then(stream => {
-        videoRef.current.srcObject = stream;
-      })
-      .catch(err => {
-        setStep('error');
-        setFeedback('Could not access camera. Please enable permissions.');
-      });
+  const handleVideoOnPlay = async () => {
+    // ... Face detection logic will be added in the next step
   };
-
-  // 4. Main face detection logic
-  const handleVideoOnPlay = () => {
-    const faceMatcher = new faceapi.FaceMatcher(getLabeledFaceDescriptors());
-
-    const interval = setInterval(async () => {
-      if (!videoRef.current) return;
-
-      setFeedback('Detecting face...');
-      canvasRef.current.innerHTML = faceapi.createCanvasFromMedia(videoRef.current);
-      const displaySize = { width: videoRef.current.width, height: videoRef.current.height };
-      faceapi.matchDimensions(canvasRef.current, displaySize);
-
-      const detections = await faceapi.detectAllFaces(videoRef.current).withFaceLandmarks().withFaceDescriptors();
-      const resizedDetections = faceapi.resizeResults(detections, displaySize);
-      const results = resizedDetections.map(d => faceMatcher.findBestMatch(d.descriptor));
-
-      if (results.length > 0 && results[0].label === 'You') {
-        setFeedback('Face matched! Marking you present...');
-        clearInterval(interval);
-        stopVideo();
-        joinSession(scannedSessionKey);
-      } else {
-        setFeedback('Please position your face in the center of the camera.');
-      }
-    }, 1000);
-  };
-
-  // 5. Helper to get user's profile image descriptor
-  const getLabeledFaceDescriptors = async () => {
-    const label = "You";
-    const descriptions = [];
-    const img = await faceapi.fetchImage(user.profileImageUrl);
-    const detections = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
-    if (detections) {
-        descriptions.push(detections.descriptor);
-        return new faceapi.LabeledFaceDescriptors(label, descriptions);
-    }
-    setStep('error');
-    setFeedback('Could not analyze your profile picture. Please set a clear one.');
-    return null;
-  };
-
-  // 6. Call the final API
-  const joinSession = async (sessionKey) => {
-    setStep('processing');
-    const res = await fetch('/api/attendance/join', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionKey, method: 'biometric' }),
-    });
-    const responseData = await res.json();
-    if (!res.ok) {
-      setStep('error');
-      setFeedback(responseData.message || 'Failed to join session');
-    } else {
-      setStep('success');
-      setFeedback(`Success! Marked present for ${responseData.courseName}.`);
-      setTimeout(() => router.push('/student/dashboard'), 3000);
-    }
-  };
-
-  const stopVideo = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-        videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-    }
-  }
 
   return (
-    <div style={{ padding: '2rem', textAlign: 'center' }}>
-      <button onClick={() => { stopVideo(); router.back(); }}>&larr; Back</button>
-      <h1>Join Session</h1>
-      <p style={{fontSize: '1.2rem', fontWeight: 'bold'}}>{feedback}</p>
+    <div className="container">
+      <div className="glass-card" style={{maxWidth: '550px'}}>
+        <button onClick={() => router.back()}>&larr; Back</button>
+        <h1 style={{textAlign: 'center'}}>Join Session</h1>
+        <p style={{textAlign: 'center', marginBottom: '2rem'}}>{feedback}</p>
 
-      {step === 'qrScan' && (
-        <div style={{ maxWidth: '500px', margin: 'auto' }}>
-          <QrReader onResult={handleQrScan} constraints={{ facingMode: 'environment' }} style={{ width: '100%' }} />
-        </div>
-      )}
+        {mode === 'choice' && (
+          <div style={{display: 'flex', flexDirection: 'column', gap: '1rem'}}>
+            <button className="form-button" onClick={() => { setMode('qr'); setFeedback('Point the QR code inside the box.'); }}>
+              Scan QR Code
+            </button>
+            <button className="form-button" onClick={() => { setMode('code'); setFeedback('Enter the code from your teacher.'); }}>
+              Enter Session Code
+            </button>
+          </div>
+        )}
 
-      {step === 'faceScan' && (
-        <div style={{position: 'relative', width: 'fit-content', margin: 'auto'}}>
+        {mode === 'qr' && step === 'scan' && (
+          <div className="scanner-container">
+            <QrScanner
+              onScan={handleQrScan}
+              onError={(error) => setFeedback(error?.message || 'QR scan failed.')}
+            />
+            <div className="viewfinder"></div>
+          </div>
+        )}
+
+        {mode === 'code' && step === 'scan' && (
+          <form onSubmit={handleCodeSubmit}>
+            <input type="text" className="form-input" placeholder="Enter session code..." value={sessionKey} onChange={(e) => setSessionKey(e.target.value)} />
+            <button type="submit" className="form-button">Submit Code</button>
+          </form>
+        )}
+
+        {step === 'faceScan' && (
+          <div style={{position: 'relative', width: 'fit-content', margin: 'auto'}}>
             <video ref={videoRef} autoPlay muted onPlay={handleVideoOnPlay} width="500" height="375" />
             <canvas ref={canvasRef} style={{position: 'absolute', top: 0, left: 0}} />
-        </div>
-      )}
+          </div>
+        )}
+
+        {(step === 'promptToSetImage' || step === 'promptToReverify') && (
+          <div style={{textAlign: 'center'}}>
+            <p style={{marginBottom: '1.5rem'}}>{feedback}</p>
+            <Link href="/student/profile" className="form-button">
+              Go to Profile
+            </Link>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -161,23 +172,25 @@ export async function getServerSideProps(context) {
   const user = await getAuthenticatedUser(context);
 
   if (!user || user.role !== 'student') {
-    return {
-      redirect: {
-        destination: '/login',
-        permanent: false,
-      },
-    };
+    return { redirect: { destination: '/login' } };
   }
 
-  if (!user.profileImageUrl) {
-    return {
-      redirect: {
-        destination: '/student/profile',
-        permanent: false,
-      },
-      props: {},
-    };
+  const hasProfileImage = !!user.faceDescriptor && user.faceDescriptor.length > 0;
+  
+  let needsReverification = false;
+  if (user.faceScanTimestamp) {
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    if (new Date(user.faceScanTimestamp) < sixMonthsAgo) {
+      needsReverification = true;
+    }
   }
 
-  return { props: { user: JSON.parse(JSON.stringify(user)) } };
+  return { 
+    props: { 
+      user: JSON.parse(JSON.stringify(user)),
+      hasProfileImage,
+      needsReverification
+    } 
+  };
 }

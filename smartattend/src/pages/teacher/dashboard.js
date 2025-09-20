@@ -1,63 +1,22 @@
 import { useSession, getSession, signOut } from 'next-auth/react';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
-import AttendanceChart from '../../components/analytics/AttendanceChart';
 import StatusPieChart from '../../components/analytics/StatusPieChart';
+import CoursePerformanceBarChart from '../../components/analytics/CoursePerformanceBarChart'; // Import new component
 
-export default function TeacherDashboard() {
-  const { data: session } = useSession();
-  const [analytics, setAnalytics] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    const fetchAnalytics = async () => {
-      setIsLoading(true);
-      try {
-        const res = await fetch('/api/teacher/analytics');
-        if (!res.ok) {
-          throw new Error('Failed to fetch your analytics data');
-        }
-        const data = await res.json();
-        setAnalytics(data);
-      } catch (e) {
-        setError(e.message);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchAnalytics();
-  }, []);
-
-  return (
-    <div style={{ padding: '2rem' }}>
-      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-        <h1>Teacher Dashboard</h1>
-        <Link href="/teacher/create-session" style={{ padding: '0.75rem 1.5rem', backgroundColor: 'blue', color: 'white', textDecoration: 'none', borderRadius: '5px' }}>
-          Create New Session
-        </Link>
-        <button onClick={() => signOut({ callbackUrl: '/login' })} style={{ padding: '0.75rem 1.5rem', backgroundColor: 'red', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', marginLeft: '1rem' }}>
-          Sign Out
-        </button>
-      </div>
-      <p>Welcome, {session?.user?.name}!</p>
-
-      {isLoading && <p>Loading analytics...</p>}
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-
+// ... inside the component's return statement ...
       {analytics && (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginTop: '2rem', alignItems: 'flex-start' }}>
-            <div style={{ maxWidth: '600px' }}>
-              <h2>Attendance Overview</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem', marginTop: '2rem', alignItems: 'flex-start' }}>
+            <div className="glass-card">
+              <h2>Course Performance</h2>
               {analytics.attendanceByCourse.length > 0 ? (
-                  <AttendanceChart data={analytics.attendanceByCourse} />
+                  <CoursePerformanceBarChart data={analytics.attendanceByCourse} />
               ) : (
                   <p>No attendance data available yet.</p>
               )}
             </div>
-            <div style={{ maxWidth: '400px' }}>
+            <div className="glass-card">
                 <h2>Status Breakdown</h2>
                 {analytics.statusBreakdown.length > 0 ? (
                     <StatusPieChart data={analytics.statusBreakdown} />
@@ -66,6 +25,7 @@ export default function TeacherDashboard() {
                 )}
             </div>
           </div>
+// ...
 
           <div style={{ marginTop: '3rem' }}>
             <h2>At-Risk Students (&lt;75% Attendance)</h2>

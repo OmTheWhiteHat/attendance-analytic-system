@@ -1,35 +1,50 @@
 import { getSession } from 'next-auth/react';
 import { getAuth } from '@clerk/nextjs/server';
-import dbConnect from './database';
-import Student from '../models/Student';
-import Teacher from '../models/Teacher';
-import Admin from '../models/Admin';
+import dbConnect from './couchdb'; // Use the new couchdb connection
 
-// Helper function for getServerSideProps and API routes
+/**
+ * A unified helper function to get the authenticated user's full profile 
+ * from CouchDB, regardless of the authentication method (Clerk or NextAuth).
+ * To be used in getServerSideProps and API routes.
+ * @param {object} context - The context object from getServerSideProps or an object with { req }.
+ * @returns {object|null} - The user document from CouchDB or null if not found/authenticated.
+ */
 export async function getAuthenticatedUser(context) {
-  await dbConnect();
-  let user = null;
+  const nano = await dbConnect();
+  const db = nano.db.use('smartattend');
 
-  // 1. Try next-auth session (for manual students, teachers, admins)
-  const nextAuthSession = await getSession(context);
-  if (nextAuthSession && nextAuthSession.user && nextAuthSession.user.role) {
-    const { id, role } = nextAuthSession.user;
-    if (role === 'student') {
-      user = await Student.findById(id).lean();
-    } else if (role === 'teacher') {
-      user = await Teacher.findById(id).lean();
-    } else if (role === 'admin') {
-      user = await Admin.findById(id).lean();
+  // 1. Check for a NextAuth session first
+  const nextAuthSession = await getSession({ req: context.req });
+  if (nextAuthSession && nextAuthSession.user && nextAuthSession.user.email) {
+    try {
+      const userId = `user:${nextAuthSession.user.email}`;
+      const user = await db.get(userId);
+      return user; // Success: return the user
+    } catch (error) {
+      if (error.statusCode !== 404) console.error("NextAuth auth helper error:", error);
+      // On error, explicitly return null before proceeding.
+      return null; 
     }
-    if (user) return { ...user, role }; // Return user with their role
   }
 
-  // 2. If not found via next-auth, try Clerk session (for Google students)
-  const { userId: clerkUserId } = getAuth(context.req);
-  if (clerkUserId) {
-    user = await Student.findOne({ clerkId: clerkUserId }).lean();
-    if (user) return { ...user, role: 'student' }; // Clerk users are students
+// 2. If no NextAuth session, check for a Clerk session
+  try {
+    const { userId: clerkId } = getAuth(context.req);
+    if (clerkId) {
+      const studentId = `user:${clerkId}`;
+      try {
+        const user = await db.get(studentId);
+        return user; // Success: return the Clerk user
+      } catch (dbError) {
+        if (dbError.statusCode !== 404) console.error("Clerk DB error:", dbError);
+        return null; // Explicitly return null on DB error
+      }
+    }
+  } catch (authError) {
+    if (!authError.message.includes('clerkMiddleware')) {
+      console.error("Clerk auth helper error:", authError);
+    }
   }
 
-  return null; // No authenticated user found
+  return null; // Explicitly return null if no user was found
 }

@@ -1,8 +1,8 @@
-import { getSession, signOut } from 'next-auth/react';
+import { getSession } from 'next-auth/react';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import StatsCard from '../../components/analytics/StatsCard';
-import AttendanceChart from '../../components/analytics/AttendanceChart';
+import DepartmentPieChart from '../../components/analytics/DepartmentPieChart';
 
 export default function AdminDashboard() {
   const [analytics, setAnalytics] = useState(null);
@@ -33,12 +33,20 @@ export default function AdminDashboard() {
     <div style={{ padding: '2rem' }}>
       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
         <h1>Admin Dashboard</h1>
-        <Link href="/admin/register-teacher" style={{ padding: '0.75rem 1.5rem', backgroundColor: 'purple', color: 'white', textDecoration: 'none', borderRadius: '5px' }}>
-          Register New Teacher
-        </Link>
-        <button onClick={() => signOut({ callbackUrl: '/login' })} style={{ padding: '0.75rem 1.5rem', backgroundColor: 'red', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', marginLeft: '1rem' }}>
-          Sign Out
-        </button>
+        <div>
+          <Link href="/admin/student-approvals" style={{ padding: '0.75rem 1.5rem', backgroundColor: 'blue', color: 'white', textDecoration: 'none', borderRadius: '5px', marginRight: '1rem' }}>
+            Student ID Approvals
+          </Link>
+          <Link href="/admin/register-teacher" style={{ padding: '0.75rem 1.5rem', backgroundColor: 'purple', color: 'white', textDecoration: 'none', borderRadius: '5px', marginRight: '1rem' }}>
+            Register Teacher
+          </Link>
+          <Link href="/admin/approvals" style={{ padding: '0.75rem 1.5rem', backgroundColor: 'orange', color: 'white', textDecoration: 'none', borderRadius: '5px' }}>
+            Face Scan Approvals
+          </Link>
+          <Link href="/logout" style={{ padding: '0.75rem 1.5rem', backgroundColor: 'red', color: 'white', textDecoration: 'none', borderRadius: '5px', marginLeft: '1rem' }}>
+            Sign Out
+          </Link>
+        </div>
       </div>
       <p>Overall analytics and system health.</p>
 
@@ -51,10 +59,14 @@ export default function AdminDashboard() {
             <StatsCard title="Total Students" value={analytics.totalStudents} />
             <StatsCard title="Total Teachers" value={analytics.totalTeachers} />
             <StatsCard title="Courses Offered" value={analytics.totalCourses} />
-            <StatsCard title="Overall Attendance" value={`${analytics.overallAttendanceRate}%`} />
+            <StatsCard title="Total Attendances" value={analytics.totalAttendances} />
           </div>
-          <div style={{ marginTop: '2rem', maxWidth: '800px', margin: 'auto' }}>
-            <AttendanceChart data={analytics.attendanceByCourse} />
+          <div style={{ marginTop: '2rem', maxWidth: '600px', margin: 'auto' }} className="glass-card">
+            {analytics.attendanceByBranch && analytics.attendanceByBranch.length > 0 ? (
+              <DepartmentPieChart data={analytics.attendanceByBranch} />
+            ) : (
+              <p>No department data to display.</p>
+            )}
           </div>
         </>
       )}

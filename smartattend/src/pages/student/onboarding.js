@@ -1,111 +1,120 @@
-import { useState } from 'react';
-import { useRouter } from 'next/router';
-import dbConnect from '../../lib/database';
-import Student from '../../models/Student';
-import { getAuthenticatedUser } from '../../lib/auth-helper';
+import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react"; // NextAuth
+import { useAuth } from "@clerk/nextjs"; // Clerk
 
-export default function OnboardingPage({ user }) {
-  const [rollNo, setRollNo] = useState(user?.rollNo || '');
-  const [registrationNo, setRegistrationNo] = useState(user?.registrationNo || '');
-  const [section, setSection] = useState(user?.section || '');
-  const [branch, setBranch] = useState(user?.branch || '');
-  const [error, setError] = useState('');
-  const router = useRouter();
+export default function OnboardingPage() {
+  const { session } = useSession(); // NextAuth session
+  const { userId: clerkId } = useAuth(); // Clerk auth
+
+  const [rollNo, setRollNo] = useState("");
+  const [registrationNo, setRegistrationNo] = useState("");
+  const [section, setSection] = useState("");
+  const [branch, setBranch] = useState("");
+  const [faceDescriptor, setFaceDescriptor] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const userEmailOrId = session?.user?.email || clerkId;
+
+  useEffect(() => {
+    if (!userEmailOrId) return;
+    setLoading(false);
+  }, [userEmailOrId]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
 
-    const res = await fetch('/api/student/onboarding', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rollNo, registrationNo, section, branch }),
-    });
+    if (!userEmailOrId) {
+      alert("You must be signed in to complete onboarding.");
+      return;
+    }
 
-    if (res.ok) {
-      // Redirect to the main student dashboard after completion
-      router.push('/student/dashboard');
-    } else {
+    try {
+      const res = await fetch("/api/student/onboarding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rollNo,
+          registrationNo,
+          section,
+          branch,
+          faceDescriptor,
+        }),
+      });
+
       const data = await res.json();
-      setError(data.message || 'An error occurred');
+
+      if (!res.ok) {
+        throw new Error(data.message || "Onboarding failed");
+      }
+
+      alert(data.message);
+    } catch (err) {
+      console.error(err);
+      alert(err.message);
     }
   };
 
+  if (loading) return <p>Loading...</p>;
+
   return (
-    <div style={{ maxWidth: '400px', margin: 'auto', padding: '2rem' }}>
-      <h1>Complete Your Profile</h1>
-      <p>Please provide your college details to finish setting up your account.</p>
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '1rem' }}>
-          <label>Roll Number</label>
+    <div style={{ padding: "2rem" }}>
+      <h1>Student Onboarding</h1>
+
+      <form onSubmit={handleSubmit} style={{ maxWidth: "500px" }}>
+        <label>
+          Roll Number:
           <input
             type="text"
             value={rollNo}
             onChange={(e) => setRollNo(e.target.value)}
-            required
-            style={{ width: '100%', padding: '0.5rem' }}
+            style={{ display: "block", margin: "0.5rem 0" }}
           />
-        </div>
-        <div style={{ marginBottom: '1rem' }}>
-          <label>Registration Number</label>
+        </label>
+
+        <label>
+          Registration Number:
           <input
             type="text"
             value={registrationNo}
             onChange={(e) => setRegistrationNo(e.target.value)}
-            required
-            style={{ width: '100%', padding: '0.5rem' }}
+            style={{ display: "block", margin: "0.5rem 0" }}
           />
-        </div>
-        <div style={{ marginBottom: '1rem' }}>
-          <label>Section</label>
+        </label>
+
+        <label>
+          Section:
           <input
             type="text"
             value={section}
             onChange={(e) => setSection(e.target.value)}
-            required
-            style={{ width: '100%', padding: '0.5rem' }}
+            style={{ display: "block", margin: "0.5rem 0" }}
           />
-        </div>
-        <div style={{ marginBottom: '1rem' }}>
-          <label>Branch</label>
+        </label>
+
+        <label>
+          Branch:
           <input
             type="text"
             value={branch}
             onChange={(e) => setBranch(e.target.value)}
-            required
-            style={{ width: '100%', padding: '0.5rem' }}
+            style={{ display: "block", margin: "0.5rem 0" }}
           />
-        </div>
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <button type="submit" style={{ padding: '0.75rem 1.5rem' }}>
-          Save and Continue
+        </label>
+
+        <label>
+          Face Descriptor (optional):
+          <input
+            type="text"
+            value={faceDescriptor}
+            onChange={(e) => setFaceDescriptor(e.target.value)}
+            style={{ display: "block", margin: "0.5rem 0" }}
+          />
+        </label>
+
+        <button type="submit" style={{ marginTop: "1rem" }}>
+          Complete Onboarding
         </button>
       </form>
     </div>
   );
-}
-
-export async function getServerSideProps(context) {
-  const user = await getAuthenticatedUser(context);
-
-  if (!user || user.role !== 'student') {
-    return {
-      redirect: {
-        destination: '/login',
-        permanent: false,
-      },
-    };
-  }
-
-  // If onboarding is already complete, redirect to the dashboard
-  if (user && user.onboardingComplete) {
-    return {
-      redirect: {
-        destination: '/student/dashboard',
-        permanent: false,
-      },
-    };
-  }
-
-  return { props: { user: JSON.parse(JSON.stringify(user)) } };
 }

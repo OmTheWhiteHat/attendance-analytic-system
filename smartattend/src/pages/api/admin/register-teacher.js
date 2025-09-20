@@ -1,6 +1,6 @@
 import { getSession } from 'next-auth/react';
-import dbConnect from '../../../lib/database';
-import Teacher from '../../../models/Teacher';
+import dbConnect from '../../../lib/couchdb'; // Updated import
+import bcrypt from 'bcryptjs';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -9,11 +9,10 @@ export default async function handler(req, res) {
 
   const session = await getSession({ req });
 
-  if (!session || session.user.role !== 'admin') {
+  // Simple check for admin role, you might have a more robust system
+  if (!session || !session.user || session.user.email !== 'admin@example.com') {
     return res.status(401).json({ message: 'Unauthorized' });
   }
-
-  await dbConnect();
 
   const { name, email, password } = req.body;
 
@@ -26,23 +25,39 @@ export default async function handler(req, res) {
   }
 
   try {
-    const existingTeacher = await Teacher.findOne({ email });
+    const nano = await dbConnect();
+    const db = nano.db.use('smartattend'); // Assuming your database name is 'smartattend'
+    const teacherId = `user:${email}`;
 
-    if (existingTeacher) {
+    // Check if teacher already exists
+    try {
+      await db.get(teacherId);
       return res.status(409).json({ message: 'Teacher with this email already exists' });
+    } catch (error) {
+      if (error.statusCode !== 404) {
+        throw error; // Re-throw if it's not a 'not found' error
+      }
+      // If 404, the user does not exist, so we can proceed.
     }
 
-    const teacher = await Teacher.create({
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const teacherDoc = {
+      _id: teacherId,
+      type: 'user',
       name,
       email,
-      password,
-      role: 'teacher', // Admin is registering a teacher
-    });
+      password: hashedPassword,
+      role: 'teacher',
+    };
 
-    res.status(201).json({ message: 'Teacher registered successfully', teacherId: teacher._id });
+    const response = await db.insert(teacherDoc);
+
+    res.status(201).json({ message: 'Teacher registered successfully', teacherId: response.id });
 
   } catch (error) {
     console.error('Teacher registration error:', error);
-    res.status(500).json({ message: 'Internal Server Error' });
+    res.status(500).json({ message: 'Internal Server Error', error: error.message });
   }
 }

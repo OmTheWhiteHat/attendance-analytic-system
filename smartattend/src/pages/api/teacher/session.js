@@ -1,7 +1,5 @@
 import { getSession } from 'next-auth/react';
-import dbConnect from '../../../lib/database';
-import Session from '../../../models/Session';
-import Course from '../../../models/Course';
+import dbConnect from '../../../lib/couchdb';
 import { randomBytes } from 'crypto';
 
 export default async function handler(req, res) {
@@ -11,48 +9,62 @@ export default async function handler(req, res) {
 
   const nextAuthSession = await getSession({ req });
 
-  if (!nextAuthSession || nextAuthSession.user.role !== 'teacher') {
+  if (!nextAuthSession || !nextAuthSession.user || nextAuthSession.user.role !== 'teacher') {
     return res.status(401).json({ message: 'Unauthorized' });
   }
 
-  await dbConnect();
-
-  const { courseId, duration } = req.body;
+  const { courseId, duration } = req.body; // e.g., courseId: "course:CS101"
 
   if (!courseId || !duration) {
     return res.status(400).json({ message: 'Missing course ID or duration' });
   }
 
   try {
-    const course = await Course.findById(courseId);
-    if (!course || course.teacher.toString() !== nextAuthSession.user.id) {
+    const nano = await dbConnect();
+    const db = nano.db.use('smartattend');
+    const teacherId = nextAuthSession.user.id;
+
+    // 1. Verify the teacher is assigned to the course
+    const courseDoc = await db.get(courseId);
+    if (!courseDoc || courseDoc.teacherId !== teacherId) {
       return res.status(403).json({ message: 'You are not the teacher of this course' });
     }
 
+    // 2. Create the new session document
     const startTime = new Date();
-    const endTime = new Date(startTime.getTime() + duration * 60000); // duration in minutes
-    const sessionKey = randomBytes(16).toString('hex');
+    const endTime = new Date(startTime.getTime() + parseInt(duration, 10) * 60000); // duration in minutes
+    const uniquePart = randomBytes(8).toString('hex');
+    const sessionId = `session:${courseId.split(':')[1]}_${startTime.toISOString()}_${uniquePart}`;
+    
+    // Capture teacher's IP for proximity checks
     const teacherIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-    const newSession = new Session({
-      course: courseId,
-      teacher: nextAuthSession.user.id,
-      startTime,
-      endTime,
-      sessionKey,
-      teacherIp,
-    });
+    const newSessionDoc = {
+      _id: sessionId,
+      type: 'session',
+      teacherId: teacherId,
+      courseId: courseId,
+      startTime: startTime.toISOString(),
+      endTime: endTime.toISOString(),
+      status: 'active',
+      networkInfo: {
+        ipAddress: teacherIp,
+      },
+    };
 
-    await newSession.save();
+    await db.insert(newSessionDoc);
 
     res.status(201).json({
       message: 'Session created successfully',
-      sessionKey: newSession.sessionKey,
-      endTime: newSession.endTime,
+      sessionId: newSessionDoc._id, // This is the manual code
+      endTime: newSessionDoc.endTime,
     });
 
   } catch (error) {
     console.error('Error creating session:', error);
-    res.status(500).json({ message: 'Internal Server Error' });
+    if (error.statusCode === 404) {
+      return res.status(404).json({ message: 'Course not found' });
+    }
+    res.status(500).json({ message: 'Internal Server Error', error: error.message });
   }
 }

@@ -9,25 +9,30 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "react": "19.1.0",
-    "react-dom": "19.1.0",
-    "next": "15.5.3",
     "@clerk/nextjs": "^6.32.0",
+    "@gsap/react": "^2.1.2",
+    "@yudiel/react-qr-scanner": "^2.3.1",
     "bcryptjs": "^3.0.2",
     "chart.js": "^4.5.0",
     "face-api.js": "^0.22.2",
+    "gsap": "^3.13.0",
     "micro": "^10.0.1",
     "mongoose": "^8.18.1",
+    "nano": "^11.0.1",
+    "next": "15.5.3",
     "next-auth": "^4.24.11",
     "qrcode": "^1.5.4",
+    "qrcode.react": "^4.2.0",
+    "react": "19.1.0",
     "react-chartjs-2": "^5.3.0",
+    "react-dom": "19.1.0",
     "svix": "^1.76.1"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4",
     "eslint": "^9",
     "eslint-config-next": "15.5.3",
-    "@eslint/eslintrc": "^3"
+    "tailwindcss": "^4"
   }
 }

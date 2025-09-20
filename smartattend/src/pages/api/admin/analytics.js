@@ -1,75 +1,103 @@
 import { getSession } from 'next-auth/react';
-import dbConnect from '../../../lib/database';
-import Student from '../../../models/Student';
-import Teacher from '../../../models/Teacher';
-import Course from '../../../models/Course';
-import Attendance from '../../../models/Attendance';
-import Session from '../../../models/Session';
+import dbConnect from '../../../lib/couchdb';
 
 export default async function handler(req, res) {
   const nextAuthSession = await getSession({ req });
 
-  if (!nextAuthSession || nextAuthSession.user.role !== 'admin') {
+  if (!nextAuthSession || !nextAuthSession.user || nextAuthSession.user.role !== 'admin') {
     return res.status(401).json({ message: 'Unauthorized' });
   }
 
-  await dbConnect();
-
   try {
-    // 1. Get total counts
-    const totalStudents = await Student.countDocuments();
-    const totalTeachers = await Teacher.countDocuments();
-    const totalCourses = await Course.countDocuments();
+    const nano = await dbConnect();
+    const db = nano.db.use('smartattend');
 
-    // 2. Calculate attendance by course using aggregation
-    const attendanceByCourse = await Attendance.aggregate([
-      {
-        $group: {
-          _id: '$course',
-          presentCount: { $sum: 1 },
-        },
-      },
-      {
-        $lookup: {
-          from: 'courses', // The actual collection name
-          localField: '_id',
-          foreignField: '_id',
-          as: 'courseDetails',
-        },
-      },
-      {
-        $unwind: '$courseDetails',
-      },
-      {
-        $project: {
-          courseName: '$courseDetails.name',
-          presentCount: '$presentCount',
-          totalStudentsInCourse: { $size: '$courseDetails.students' },
-        },
-      },
+    // 1. Get total counts using Mango queries
+    const studentsQuery = { selector: { type: 'user', role: 'student' }, fields: ['_id'] };
+    const teachersQuery = { selector: { type: 'user', role: 'teacher' }, fields: ['_id'] };
+    const coursesQuery = { selector: { type: 'course' }, fields: ['_id'] };
+    const attendanceQuery = { selector: { type: 'attendance' }, fields: ['_id', 'sessionId'] };
+
+    const [studentsResult, teachersResult, coursesResult, attendanceResult] = await Promise.all([
+      db.find(studentsQuery),
+      db.find(teachersQuery),
+      db.find(coursesQuery),
+      db.find(attendanceQuery)
     ]);
 
-    // 3. Calculate overall attendance rate
-    const totalSessions = await Session.countDocuments();
-    // This calculation needs to be more precise, considering only enrolled students
-    // For simplicity, let's use total students * total sessions as a max possible
-    const totalPossibleAttendances = totalStudents * totalSessions; 
-    const totalActualAttendances = await Attendance.countDocuments();
-    const overallAttendanceRate = totalPossibleAttendances > 0 
-      ? ((totalActualAttendances / totalPossibleAttendances) * 100).toFixed(1) 
-      : 0;
+    const totalStudents = studentsResult.docs.length;
+    const totalTeachers = teachersResult.docs.length;
+    const totalCourses = coursesResult.docs.length;
+    const totalActualAttendances = attendanceResult.docs.length;
+
+    // Note: Calculating overall attendance rate without knowing total possible attendance
+    // is speculative. A more robust implementation would require fetching all sessions
+    // and all student enrollments. For this version, we'll provide the raw counts.
+    // A simple overall rate is not meaningful without the denominator.
+
+    // 2. For attendance by course, we need to fetch more data and process it.
+    // This is less efficient than a DB-level aggregation but is the direct approach with basic Mango queries.
+    const allCourses = (await db.find({ selector: { type: 'course' } })).docs;
+    const allAttendance = (await db.find({ selector: { type: 'attendance' } })).docs;
+    const allSessions = (await db.find({ selector: { type: 'session' } })).docs;
+
+    // Create a map for quick lookups
+    const sessionToCourseMap = allSessions.reduce((map, session) => {
+      map[session._id] = session.courseId;
+      return map;
+    }, {});
+
+    const courseIdToNameMap = allCourses.reduce((map, course) => {
+      map[course._id] = course.name;
+      return map;
+    }, {});
+
+    const attendanceByCourse = allAttendance.reduce((acc, record) => {
+      const courseId = sessionToCourseMap[record.sessionId];
+      if (courseId) {
+        if (!acc[courseId]) {
+          acc[courseId] = {
+            courseName: courseIdToNameMap[courseId] || 'Unknown Course',
+            presentCount: 0,
+          };
+        }
+        acc[courseId].presentCount++;
+      }
+      return acc;
+    }, {});
+
+    // Process data for attendance by branch
+    const allStudents = (await db.find({ selector: { type: 'user', role: 'student' }, fields: ['_id', 'branch'] })).docs;
+    const studentIdToBranchMap = allStudents.reduce((map, student) => {
+      map[student._id] = student.branch || 'Unknown';
+      return map;
+    }, {});
+
+    const attendanceByBranch = allAttendance.reduce((acc, record) => {
+      const branch = studentIdToBranchMap[record.studentId];
+      if (branch) {
+        const existing = acc.find(item => item.name === branch);
+        if (existing) {
+          existing.count++;
+        } else {
+          acc.push({ name: branch, count: 1 });
+        }
+      }
+      return acc;
+    }, []);
 
 
     res.status(200).json({
       totalStudents,
       totalTeachers,
       totalCourses,
-      overallAttendanceRate,
-      attendanceByCourse, // This will be an array of { courseName, presentCount, totalStudentsInCourse }
+      totalAttendances: totalActualAttendances,
+      attendanceByCourse: Object.values(attendanceByCourse),
+      attendanceByBranch, // Add to response
     });
 
   } catch (error) {
     console.error('Error fetching admin analytics:', error);
-    res.status(500).json({ message: 'Internal Server Error' });
+    res.status(500).json({ message: 'Internal Server Error', error: error.message });
   }
 }
